@@ -13,6 +13,7 @@ class CacheManager {
   ICacheStore? _diskCacheStore;
   ICacheStore? _memoryCacheStore;
   late Utf8Encoder _utf8encoder;
+  Duration _serverTimeDiff = Duration(seconds: 0);
 
   CacheManager(this._config) {
     _utf8encoder = const Utf8Encoder();
@@ -22,6 +23,9 @@ class CacheManager {
               _config.encrypt, _config.decrypt);
     if (!_config.skipMemoryCache)
       _memoryCacheStore = MemoryCacheStore(_config.maxMemoryCacheCount);
+  }
+  set serverTimeDiff(Duration diff) {
+    _serverTimeDiff = diff;
   }
 
   Future<CacheObj?> _pullFromCache(String key, {String? subKey}) async {
@@ -33,7 +37,7 @@ class CacheManager {
       if (null != obj) await _memoryCacheStore?.setCacheObj(obj);
     }
     if (null != obj) {
-      var now = DateTime.now().millisecondsSinceEpoch;
+      var now = (DateTime.now().add(_serverTimeDiff)).millisecondsSinceEpoch;
       if (null != obj.maxStaleDate && obj.maxStaleDate! > 0) {
         //if maxStaleDate exist, Remove it if maxStaleDate expired.
         if (obj.maxStaleDate! < now) {
@@ -56,7 +60,8 @@ class CacheManager {
     var obj = await _pullFromCache(key, subKey: subKey);
     if (null != obj &&
         null != obj.maxAgeDate &&
-        obj.maxAgeDate! < DateTime.now().millisecondsSinceEpoch) {
+        obj.maxAgeDate! <
+            DateTime.now().add(_serverTimeDiff).millisecondsSinceEpoch) {
       return null;
     }
     return obj;

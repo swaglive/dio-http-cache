@@ -16,12 +16,15 @@ const DIO_CACHE_HEADER_KEY_DATA_SOURCE = "dio_cache_header_key_data_source";
 
 typedef _ParseHeadCallback = void Function(
     Duration? _maxAge, Duration? _maxStale);
+typedef RevalidateHandler = Future Function(Response response);
 
 class DioCacheManager {
   late CacheManager _manager;
   InterceptorsWrapper? _interceptor;
   late String? _baseUrl;
   late String _defaultRequestMethod;
+  RevalidateHandler? _revalidateHandler;
+  Duration _serverTimeDiff = Duration(seconds: 0);
 
   DioCacheManager(CacheConfig config) {
     _manager = CacheManager(config);
@@ -38,6 +41,15 @@ class DioCacheManager {
     return _interceptor;
   }
 
+  set revalidateHandler(RevalidateHandler handler) {
+    _revalidateHandler = handler;
+  }
+
+  set serverTimeDiff(Duration diff) {
+    _serverTimeDiff = diff;
+    _manager.serverTimeDiff = diff;
+  }
+
   _onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
     if ((options.extra[DIO_CACHE_KEY_TRY_CACHE] ?? false) != true) {
       return handler.next(options);
@@ -47,10 +59,30 @@ class DioCacheManager {
     }
     var responseDataFromCache = await _pullFromCacheBeforeMaxAge(options);
     if (null != responseDataFromCache) {
-      return handler.resolve(
-          _buildResponse(
-              responseDataFromCache, responseDataFromCache.statusCode, options),
-          true);
+      Response response = _buildResponse(
+          responseDataFromCache, responseDataFromCache.statusCode, options);
+      var cacheControl = response.headers.value(HttpHeaders.cacheControlHeader);
+      if (null != cacheControl) {
+        Map<String, String?> parameters;
+        try {
+          parameters = HeaderValue.parse(
+                  "${HttpHeaders.cacheControlHeader}: $cacheControl",
+                  parameterSeparator: ",",
+                  valueSeparator: "=")
+              .parameters;
+          Duration? swr =
+              _tryGetDurationFromMap(parameters, 'stale-while-revalidate');
+          if (swr != null &&
+              (DateTime.now().add(_serverTimeDiff).millisecondsSinceEpoch) >
+                  ((responseDataFromCache.maxAgeDate ?? 0) -
+                      swr.inMilliseconds)) {
+            _revalidateHandler?.call(response);
+          }
+        } catch (e) {
+          print("manager_dio $e");
+        }
+      }
+      return handler.resolve(response, true);
     }
     return handler.next(options);
   }
@@ -73,7 +105,6 @@ class DioCacheManager {
       if (null != responseDataFromCache) {
         var response = _buildResponse(responseDataFromCache,
             responseDataFromCache.statusCode, e.requestOptions);
-
         return handler.resolve(response);
       }
     }
@@ -81,7 +112,10 @@ class DioCacheManager {
   }
 
   Response _buildResponse(
-      CacheObj obj, int? statusCode, RequestOptions options) {
+    CacheObj obj,
+    int? statusCode,
+    RequestOptions options,
+  ) {
     Headers? headers;
     if (null != obj.headers) {
       headers = Headers.fromMap((Map<String, List<dynamic>>.from(
@@ -134,6 +168,13 @@ class DioCacheManager {
     } else {
       data = utf8.encode(jsonEncode(response.data));
     }
+    //this is to fix 3rd party library uses DateTime.now() not our server time
+    if (maxAge != null) {
+      maxAge = maxAge! + _serverTimeDiff;
+    }
+    if (maxStale != null) {
+      maxStale = maxStale! + _serverTimeDiff;
+    }
     var obj = CacheObj(_getPrimaryKeyFromOptions(options), data!,
         subKey: _getSubKeyFromOptions(options),
         maxAge: maxAge,
@@ -165,6 +206,16 @@ class DioCacheManager {
         if (null == maxStale) {
           maxStale = _tryGetDurationFromMap(parameters, "max-stale");
         }
+        if (null == _maxAge) {
+          _maxAge =
+              _tryGetDurationFromMap(parameters, "stale-while-revalidate");
+        } else {
+          Duration? staleWhileRevalidate =
+              _tryGetDurationFromMap(parameters, "stale-while-revalidate");
+          if (staleWhileRevalidate != null) {
+            _maxAge = _maxAge + staleWhileRevalidate;
+          }
+        }
       } catch (e) {
         print(e);
       }
@@ -178,8 +229,9 @@ class DioCacheManager {
         } catch (e) {
           print(e);
         }
-        if (null != endTime && endTime.compareTo(DateTime.now()) >= 0) {
-          _maxAge = endTime.difference(DateTime.now());
+        if (null != endTime &&
+            endTime.compareTo(DateTime.now().add(_serverTimeDiff)) >= 0) {
+          _maxAge = endTime.difference((DateTime.now().add(_serverTimeDiff)));
         }
       }
     }
