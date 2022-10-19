@@ -47,7 +47,6 @@ class DioCacheManager {
 
   set serverTimeDiff(Duration diff) {
     _serverTimeDiff = diff;
-    _manager.serverTimeDiff = diff;
   }
 
   _onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
@@ -73,7 +72,7 @@ class DioCacheManager {
           Duration? swr =
               _tryGetDurationFromMap(parameters, 'stale-while-revalidate');
           if (swr != null &&
-              (DateTime.now().add(_serverTimeDiff).millisecondsSinceEpoch) >
+              (DateTime.now().millisecondsSinceEpoch) >
                   ((responseDataFromCache.maxAgeDate ?? 0) -
                       swr.inMilliseconds)) {
             _revalidateHandler?.call(response);
@@ -170,10 +169,10 @@ class DioCacheManager {
     }
     //this is to fix 3rd party library uses DateTime.now() not our server time
     if (maxAge != null) {
-      maxAge = maxAge! + _serverTimeDiff;
+      maxAge = maxAge!;
     }
     if (maxStale != null) {
-      maxStale = maxStale! + _serverTimeDiff;
+      maxStale = maxStale!;
     }
     var obj = CacheObj(_getPrimaryKeyFromOptions(options), data!,
         subKey: _getSubKeyFromOptions(options),
