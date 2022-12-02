@@ -197,10 +197,10 @@ class DioCacheManager {
                 parameterSeparator: ",",
                 valueSeparator: "=")
             .parameters;
-        _maxAge = _tryGetDurationFromMap(parameters, "s-maxage");
-        if (null == _maxAge) {
-          _maxAge = _tryGetDurationFromMap(parameters, "max-age");
-        }
+        // _maxAge = _tryGetDurationFromMap(parameters, "s-maxage");
+        // if (null == _maxAge) {
+        _maxAge = _tryGetDurationFromMap(parameters, "max-age");
+        // }
         // if maxStale has valued, don't get max-stale anymore.
         if (null == maxStale) {
           maxStale = _tryGetDurationFromMap(parameters, "max-stale");
